@@ -1,0 +1,27 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+
+#include "rk356x-u-boot.dtsi"
+
+/ {
+	model = "Xunlong OrangePi 3B";
+	compatible = "xunlong,orangepi-3b", "rockchip,rk3566";
+
+	chosen: chosen {
+		u-boot,spl-boot-order = &spi_nor, &sdhci, &sdmmc0;
+	};
+};
+
+&uart2 {
+	clock-frequency = <24000000>;
+	bootph-all;
+	status = "okay";
+};
+
+&usb_host0_ohci {
+	status = "disable";
+};
+
+&usb_host0_xhci {
+	dr_mode = "otg";
+	status = "okay";
+};
