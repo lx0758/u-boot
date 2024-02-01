@@ -12,3 +12,18 @@
 		bootph-some-ram;
 	};
 };
+
+&uart2 {
+	clock-frequency = <24000000>;
+	bootph-all;
+	status = "okay";
+};
+
+&usb_host0_ohci {
+	status = "disable";
+};
+
+&usb_host0_xhci {
+	dr_mode = "otg";
+	status = "okay";
+};
