@@ -342,8 +342,23 @@ static ulong android_image_get_kernel_addr(struct andr_image_data *img_data,
 	 */
 	if (img_data->kernel_addr  == ANDROID_IMAGE_DEFAULT_KERNEL_ADDR ||
 	    IS_ENABLED(CONFIG_ANDROID_BOOT_IMAGE_IGNORE_BLOB_ADDR)) {
-		if (comp == IH_COMP_NONE)
+		if (comp == IH_COMP_NONE) {
+			/*
+			 * On ARM64, the kernel must be loaded at a 2MB-aligned
+			 * address per the ARM64 boot protocol. If the in-place
+			 * address is not 2MB-aligned, fall back to kernel_addr_r
+			 * so that bootm relocates the kernel correctly.
+			 */
+			if (IS_ENABLED(CONFIG_ARM64) &&
+			    !IS_ALIGNED(img_data->kernel_ptr, SZ_2M)) {
+				ulong addr = env_get_ulong("kernel_addr_r",
+							   16, 0);
+				if (addr)
+					return addr;
+				log_err("kernel_addr_r not set and kernel is not 2MB-aligned\n");
+			}
 			return img_data->kernel_ptr;
+		}
 		return env_get_ulong("kernel_addr_r", 16, 0);
 	}
 
@@ -872,9 +887,16 @@ static bool android_image_get_dtb_img_addr(ulong hdr_addr, ulong vhdr_addr, ulon
 			unmap_sysmem(v_hdr);
 			goto exit;
 		}
-		/* Calculate the address of DTB area in boot image */
+		/*
+		 * The vendor boot header occupies ALIGN(header_size, page_size)
+		 * bytes, not just page_size. Using page_size directly gives the
+		 * wrong DTB offset when page_size < header_size (e.g. 2048 < 2128).
+		 */
 		dtb_img_addr = vhdr_addr;
-		dtb_img_addr += v_hdr->page_size;
+		if (v_hdr->header_version > 3)
+			dtb_img_addr += ALIGN(ANDR_VENDOR_BOOT_V4_SIZE, v_hdr->page_size);
+		else
+			dtb_img_addr += ALIGN(ANDR_VENDOR_BOOT_V3_SIZE, v_hdr->page_size);
 		if (v_hdr->vendor_ramdisk_size)
 			dtb_img_addr += ALIGN(v_hdr->vendor_ramdisk_size, v_hdr->page_size);
 		*addr = dtb_img_addr;
