@@ -20,6 +20,7 @@
 
 #ifndef __ASSEMBLY__
 int setup_boot_mode(void);
+void set_back_to_bootrom_dnl_flag(void);
 #endif
 
 #endif
