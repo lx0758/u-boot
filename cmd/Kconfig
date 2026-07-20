@@ -692,6 +692,15 @@ config CMD_ZBOOT
 	  booting both 32- and 64-bit kernels, as well as secure boot.
 	  Documentation is available in doc/usage/fit/x86-fit-boot.rst.
 
+config CMD_RBROM
+	bool "rbrom"
+	depends on ARCH_ROCKCHIP
+	help
+	  Reboot the device into Rockchip BootROM download mode.
+	  This writes a magic value to the boot mode register and
+	  triggers a system reset. On the next boot, the SPL will
+	  detect the flag and return to BootROM for USB download.
+
 endmenu
 
 menu "Environment commands"
