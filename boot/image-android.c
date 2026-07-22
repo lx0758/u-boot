@@ -570,6 +570,9 @@ static long android_boot_append_bootconfig(const struct andr_image_data *img_dat
 	if (img_data->bootconfig_size) {
 		bootconfig_src = map_sysmem(img_data->bootconfig_addr,
 					    img_data->bootconfig_size);
+		printf("ANDROID: vendor bootconfig (%lu bytes):\n%.*s\n",
+		       (ulong)img_data->bootconfig_size,
+		       (int)img_data->bootconfig_size, (char *)bootconfig_src);
 		memcpy((char *)ramdisk_dest + img_data->vendor_ramdisk_size +
 		       img_data->boot_ramdisk_size,
 		       bootconfig_src, img_data->bootconfig_size);
@@ -579,6 +582,8 @@ static long android_boot_append_bootconfig(const struct andr_image_data *img_dat
 			void *bootconfig_ptr = (char *)ramdisk_dest +
 					       img_data->vendor_ramdisk_size +
 					       img_data->boot_ramdisk_size;
+			printf("ANDROID: appended bootconfig (%ld bytes):\n%.*s\n",
+			       params_len, (int)params_len, params);
 			bytes_added = add_bootconfig_parameters(params, params_len,
 								(ulong)bootconfig_ptr,
 								img_data->bootconfig_size);
