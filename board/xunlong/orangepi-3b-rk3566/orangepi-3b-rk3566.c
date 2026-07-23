@@ -59,8 +59,10 @@ int rk_board_late_init(void)
 {
 	const struct board_model *model = get_board_model();
 
-	if (model)
+	if (model) {
 		env_set("fdtfile", model->fdtfile);
+		env_set_ulong("adtb_idx", model->value);
+	}
 
 	return 0;
 }
