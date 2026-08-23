@@ -85,6 +85,14 @@ static void boot_fdt_handle_region(u64 addr, u64 size, u32 flags, bool free)
 	phys_addr_t rsv_addr;
 
 	rsv_addr = (phys_addr_t)addr;
+
+	if (!lmb_get_free_size(rsv_addr)) {
+		debug("   %s fdt memory region: addr=%llx size=%llx (outside LMB, skipped)\n",
+		      free ? "freed" : "reserved", (unsigned long long)addr,
+		      (unsigned long long)size);
+		return;
+	}
+
 	if (free)
 		ret = lmb_free(rsv_addr, size, flags);
 	else
