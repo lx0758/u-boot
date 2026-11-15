@@ -311,7 +311,13 @@ static int android_read_bootflow(struct udevice *dev, struct bootflow *bflow)
 	configure_serialno(bflow);
 	configure_bootloader_version(bflow);
 
-	if (priv->boot_mode == ANDROID_BOOT_MODE_NORMAL && priv->slot) {
+	/*
+	 * Always declare a normal boot explicitly. Without this flag, init
+	 * treats any image that ships /system/bin/recovery as a recovery boot
+	 * (see system/core/init/first_stage_init.cpp), which would loop on
+	 * non-A/B devices where no slot suffix is available.
+	 */
+	if (priv->boot_mode == ANDROID_BOOT_MODE_NORMAL) {
 		ret = bootflow_cmdline_set_arg(bflow, "androidboot.force_normal_boot",
 					       "1", false);
 		if (ret < 0) {
