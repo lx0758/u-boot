@@ -223,6 +223,11 @@ CONFIG_CMD_WOL=y
 CONFIG_CMD_WRITE=y
 # 自定义启动命令
 CONFIG_BOOTDELAY=0
+# Rockchip 平台在 BOOT_FASTBOOT 模式下由 setup_boot_mode() 设置 preboot
+# （"setenv preboot; fastboot usb 0"），把 fastboot reboot bootloader 的意图
+# 从寄存器带到下一次启动；不打开本项时 preboot 变量不会被读取，设备只会
+# 复位后正常启动系统。preboot 的默认值为空，正常启动不受影响。
+CONFIG_USE_PREBOOT=y
 CONFIG_USE_BOOTARGS=y
 CONFIG_BOOTARGS=""
 CONFIG_USE_BOOTCOMMAND=y

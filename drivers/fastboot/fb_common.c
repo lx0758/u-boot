@@ -80,22 +80,22 @@ void fastboot_okay(const char *reason, char *response)
 		fastboot_response("OKAY", response, NULL);
 }
 
+#ifndef CONFIG_XPL_BUILD
 /**
- * fastboot_set_reboot_flag() - Set flag to indicate reboot-bootloader
+ * fastboot_set_reboot_flag_bcb() - Set the reboot reason in the Android BCB
  *
- * Set flag which indicates that we should reboot into the bootloader
- * following the reboot that fastboot executes after this function.
+ * Write the command word for @reason into the "misc" partition's Bootloader
+ * Control Block. The Android boot chain (bootmeth_android) reads it on the
+ * next boot to decide whether to enter fastboot, fastbootd or recovery.
  *
- * This function should be overridden in your board file with one
- * which sets whatever flag your board specific Android bootloader flow
- * requires in order to re-enter the bootloader.
+ * Board specific overrides of fastboot_set_reboot_flag() can call this helper
+ * when they need to hand the reboot intent over to the Android boot chain.
+ *
+ * @reason: reboot reason to record
+ * Return: 0 on success, negative errno on failure
  */
-int __weak fastboot_set_reboot_flag(enum fastboot_reboot_reason reason)
+int fastboot_set_reboot_flag_bcb(enum fastboot_reboot_reason reason)
 {
-#ifdef CONFIG_XPL_BUILD
-	/* SPL does not provide the BCB command plumbing used by U-Boot proper. */
-	return -EOPNOTSUPP;
-#else
 	int ret;
 	static const char * const boot_cmds[] = {
 		[FASTBOOT_REBOOT_REASON_BOOTLOADER] = "bootonce-bootloader",
@@ -134,6 +134,26 @@ int __weak fastboot_set_reboot_flag(enum fastboot_reboot_reason reason)
 out:
 	bcb_reset();
 	return ret;
+}
+#endif /* !CONFIG_XPL_BUILD */
+
+/**
+ * fastboot_set_reboot_flag() - Set flag to indicate reboot-bootloader
+ *
+ * Set flag which indicates that we should reboot into the bootloader
+ * following the reboot that fastboot executes after this function.
+ *
+ * This function should be overridden in your board file with one
+ * which sets whatever flag your board specific Android bootloader flow
+ * requires in order to re-enter the bootloader.
+ */
+int __weak fastboot_set_reboot_flag(enum fastboot_reboot_reason reason)
+{
+#ifdef CONFIG_XPL_BUILD
+	/* SPL does not provide the BCB command plumbing used by U-Boot proper. */
+	return -EOPNOTSUPP;
+#else
+	return fastboot_set_reboot_flag_bcb(reason);
 #endif
 }
 

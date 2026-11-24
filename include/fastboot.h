@@ -119,6 +119,20 @@ void fastboot_okay(const char *reason, char *response);
  */
 int fastboot_set_reboot_flag(enum fastboot_reboot_reason reason);
 
+#ifndef CONFIG_XPL_BUILD
+/**
+ * fastboot_set_reboot_flag_bcb() - Store the reboot reason in the Android BCB
+ *
+ * Board specific implementations of fastboot_set_reboot_flag() can call this
+ * helper to record the reboot intent in the "misc" partition's Bootloader
+ * Control Block, where the Android boot chain picks it up on the next boot.
+ *
+ * @reason: reboot reason to record
+ * Return: 0 on success, negative errno on failure
+ */
+int fastboot_set_reboot_flag_bcb(enum fastboot_reboot_reason reason);
+#endif
+
 /**
  * fastboot_set_progress_callback() - set progress callback
  *

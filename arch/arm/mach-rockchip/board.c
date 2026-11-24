@@ -312,8 +312,19 @@ int board_usb_cleanup(int index, enum usb_init_type init)
 #if IS_ENABLED(CONFIG_FASTBOOT)
 int fastboot_set_reboot_flag(enum fastboot_reboot_reason reason)
 {
-	if (reason != FASTBOOT_REBOOT_REASON_BOOTLOADER)
+	if (reason != FASTBOOT_REBOOT_REASON_BOOTLOADER) {
+#if IS_ENABLED(CONFIG_ANDROID_BOOT_IMAGE)
+		/*
+		 * The Android boot chain transports the reboot intent through
+		 * the BCB in the "misc" partition: "boot-fastboot" and
+		 * "boot-recovery" are dispatched by bootmeth_android to
+		 * fastbootd and recovery on the next boot.
+		 */
+		return fastboot_set_reboot_flag_bcb(reason);
+#else
 		return -ENOTSUPP;
+#endif
+	}
 
 	printf("Setting reboot to fastboot flag ...\n");
 	/* Set boot mode to fastboot */
