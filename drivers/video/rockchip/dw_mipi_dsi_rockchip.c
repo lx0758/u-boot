@@ -224,6 +224,7 @@ struct dw_rockchip_dsi_priv {
 	struct mipi_dsi_device device;
 	void __iomem *base;
 	struct udevice *panel;
+	struct display_timing timings;
 	void __iomem *grf;
 
 	/* Optional external dphy */
@@ -240,6 +241,7 @@ struct dw_rockchip_dsi_priv {
 	u16 feedback_div;
 	const struct rockchip_dw_dsi_chip_data *cdata;
 	struct udevice *dsi_host;
+	bool panel_up;
 };
 
 static inline void dsi_write(struct dw_rockchip_dsi_priv *dsi, u32 reg, u32 val)
@@ -505,16 +507,8 @@ static void dsi_phy_post_set_mode(void *priv_data, unsigned long mode_flags)
 	if (!dsi)
 		return;
 
-	/*
-	 * DSI wrapper must be enabled in video mode & disabled in command mode.
-	 * If wrapper is enabled in command mode, the display controller
-	 * register access will hang. Note that this was carried over from the
-	 * stm32 dsi driver and is unknown if necessary for Rockchip.
-	 */
-
-	if (mode_flags & MIPI_DSI_MODE_VIDEO)
-		dsi_set(dsi, DSI_WCR, WCR_DSIEN);
-	else
+	/* Match mainline Linux: never set the legacy video-mode DSIEN bit */
+	if (!(mode_flags & MIPI_DSI_MODE_VIDEO))
 		dsi_clear(dsi, DSI_WCR, WCR_DSIEN);
 }
 
@@ -526,8 +520,6 @@ dw_mipi_dsi_get_lane_mbps(void *priv_data, struct display_timing *timings,
 	struct udevice *dev = device->dev;
 	struct dw_rockchip_dsi_priv *dsi = dev_get_priv(dev);
 	int bpp;
-	unsigned long mpclk, tmp;
-	unsigned int target_mbps = 1000;
 	unsigned int max_mbps = dppa_map[ARRAY_SIZE(dppa_map) - 1].max_mbps;
 	unsigned long best_freq = 0;
 	unsigned long fvco_min, fvco_max, fin, fout;
@@ -544,30 +536,32 @@ dw_mipi_dsi_get_lane_mbps(void *priv_data, struct display_timing *timings,
 		return bpp;
 	}
 
-	mpclk = DIV_ROUND_UP(timings->pixelclock.typ, 1000);
-	if (mpclk) {
-		/* take 1 / 0.8, since mbps must big than bandwidth of RGB */
-		tmp = (mpclk * (bpp / lanes) * 10 / 8) / 1000;
-		if (tmp < max_mbps)
-			target_mbps = tmp;
-		else
-			dev_err(dsi->dsi_host,
-				"DPHY clock frequency is out of range\n");
+	fout = timings->pixelclock.typ / MSEC_PER_SEC * bpp / lanes;
+
+	/*
+	 * 1/0.8 headroom, same as the Linux kernel: the lane rate must exceed
+	 * the raw RGB bandwidth to cover DSI packet/EoT overhead.
+	 */
+	fout = fout * 10 / 8;
+	fout *= MSEC_PER_SEC;
+
+	if (fout > max_mbps * USEC_PER_SEC) {
+		dev_err(dsi->dsi_host, "DPHY clock frequency is out of range\n");
+		return -EINVAL;
 	}
 
 	/* for external phy only the mipi_dphy_config is necessary */
 	if (generic_phy_valid(&dsi->phy)) {
-		phy_mipi_dphy_get_default_config(timings->pixelclock.typ  * 10 / 8,
+		phy_mipi_dphy_get_default_config(fout / bpp * lanes,
 						 bpp, lanes,
 						 &dsi->phy_opts);
-		dsi->lane_mbps = target_mbps;
+		dsi->lane_mbps = DIV_ROUND_UP(fout, USEC_PER_SEC);
 		*lane_mbps = dsi->lane_mbps;
 
 		return 0;
 	}
 
 	fin = clk_get_rate(dsi->ref);
-	fout = target_mbps * USEC_PER_SEC;
 
 	/* constraint: 5Mhz <= Fref / N <= 40MHz */
 	min_prediv = DIV_ROUND_UP(fin, 40 * USEC_PER_SEC);
@@ -708,12 +702,25 @@ static const struct mipi_dsi_phy_ops dsi_rockchip_phy_ops = {
 	.post_set_mode = dsi_phy_post_set_mode,
 };
 
+/*
+ * Tear down the SoC side after a DSI bring-up failure: power off the external
+ * D-PHY (inno driver disables lane/LDO/PLL/bandgap and clocks) and forget the
+ * panel state, so the HDMI fallback starts clean. generic_phy_power_off() is a
+ * no-op when the PHY was never powered on.
+ */
+static void dw_mipi_dsi_rockchip_power_off(struct dw_rockchip_dsi_priv *priv)
+{
+	if (generic_phy_valid(&priv->phy))
+		generic_phy_power_off(&priv->phy);
+	priv->panel_up = false;
+}
+
 static int dw_mipi_dsi_rockchip_attach(struct udevice *dev)
 {
 	struct dw_rockchip_dsi_priv *priv = dev_get_priv(dev);
 	struct mipi_dsi_device *device = &priv->device;
 	struct mipi_dsi_panel_plat *mplat;
-	struct display_timing timings;
+	struct display_timing *timings = &priv->timings;
 	int ret;
 
 	ret = uclass_first_device_err(UCLASS_PANEL, &priv->panel);
@@ -728,10 +735,10 @@ static int dw_mipi_dsi_rockchip_attach(struct udevice *dev)
 	device->format = mplat->format;
 	device->mode_flags = mplat->mode_flags;
 
-	ret = panel_get_display_timing(priv->panel, &timings);
+	ret = panel_get_display_timing(priv->panel, timings);
 	if (ret) {
 		ret = ofnode_decode_display_timing(dev_ofnode(priv->panel),
-						   0, &timings);
+						   0, timings);
 		if (ret) {
 			dev_err(dev, "decode display timing error %d\n", ret);
 			return ret;
@@ -744,11 +751,23 @@ static int dw_mipi_dsi_rockchip_attach(struct udevice *dev)
 		return ret;
 	}
 
-	ret = dsi_host_init(priv->dsi_host, device, &timings, 4,
+	ret = dsi_host_init(priv->dsi_host, device, timings, 4,
 			    &dsi_rockchip_phy_ops);
 	if (ret) {
 		dev_err(dev, "failed to initialize mipi dsi host\n");
+		dw_mipi_dsi_rockchip_power_off(priv);
 		return ret;
+	}
+
+	/* Bring the panel up before the VOP starts, like the Linux bridge prepare */
+	ret = panel_enable_backlight(priv->panel);
+	if (!ret) {
+		priv->panel_up = true;
+	} else if (ret == -ENOSYS) {
+		priv->panel_up = true;
+	} else {
+		/* set_backlight() will retry and report the failure */
+		dev_warn(dev, "early panel bring-up failed: %d\n", ret);
 	}
 
 	return 0;
@@ -763,16 +782,30 @@ static int dw_mipi_dsi_rockchip_set_bl(struct udevice *dev, int percent)
 	 * Allow backlight to be optional, since this driver may be
 	 * used to simply detect a panel rather than bring one up.
 	 */
-	ret = panel_enable_backlight(priv->panel);
-	if ((ret) && (ret != -ENOSYS)) {
-		dev_err(dev, "panel %s enable backlight error %d\n",
-			priv->panel->name, ret);
-		return ret;
+	if (priv->panel_up) {
+		/* Panel was initialised in attach(), before the VOP started */
+		ret = panel_set_backlight(priv->panel, percent);
+		if (ret == -ENOSYS)
+			ret = 0;
+		if (ret) {
+			dev_err(dev, "panel %s set backlight error %d\n",
+				priv->panel->name, ret);
+			return ret;
+		}
+	} else {
+		ret = panel_enable_backlight(priv->panel);
+		if ((ret) && (ret != -ENOSYS)) {
+			dev_err(dev, "panel %s enable backlight error %d\n",
+				priv->panel->name, ret);
+			dw_mipi_dsi_rockchip_power_off(priv);
+			return ret;
+		}
 	}
 
 	ret = dsi_host_enable(priv->dsi_host);
 	if (ret) {
 		dev_err(dev, "failed to enable mipi dsi host\n");
+		dw_mipi_dsi_rockchip_power_off(priv);
 		return ret;
 	}
 
@@ -843,7 +876,7 @@ static int dw_mipi_dsi_rockchip_probe(struct udevice *dev)
 	 * NULL if it's not initialized.
 	 */
 	ret = generic_phy_get_by_name(dev, "dphy", &priv->phy);
-	if (ret && ret != -ENODATA) {
+	if (ret && ret != -ENOENT) {
 		dev_err(dev, "failed to get mipi dphy: %d\n", ret);
 		return ret;
 	}
@@ -906,9 +939,19 @@ static int dw_mipi_dsi_rockchip_probe(struct udevice *dev)
 	return 0;
 }
 
+static int dw_mipi_dsi_rockchip_get_dt(struct udevice *dev,
+				       struct display_timing *timings)
+{
+	struct dw_rockchip_dsi_priv *priv = dev_get_priv(dev);
+
+	memcpy(timings, &priv->timings, sizeof(*timings));
+	return 0;
+}
+
 struct video_bridge_ops dw_mipi_dsi_rockchip_ops = {
 	.attach = dw_mipi_dsi_rockchip_attach,
 	.set_backlight = dw_mipi_dsi_rockchip_set_bl,
+	.get_display_timing = dw_mipi_dsi_rockchip_get_dt,
 };
 
 static const struct rockchip_dw_dsi_chip_data rk3399_chip_data[] = {

@@ -1,3 +1,67 @@
 // SPDX-License-Identifier: GPL-2.0+
 
+#include <dt-bindings/soc/rockchip,vop2.h>
+
 #include "rk3566-orangepi-3b-u-boot.dtsi"
+
+/*
+ * v1.1 板型带 30-pin MIPI DSI 排线接口（接 Raspberry Pi 7 寸触摸屏），
+ * 内置屏优先，面板读取失败再回退 HDMI。
+ *
+ * DSI1 D-PHY 的 0.9V/1.8V 模拟供电来自 vdda0v9_image / vcca1v8_image，
+ * 这两个 rail 默认不使能；U-Boot 没有 consumer，需在启动时打开，
+ * 否则 D-PHY PLL 冷启动锁不上。
+ */
+&vdda0v9_image {
+	regulator-boot-on;
+};
+
+&vcca1v8_image {
+	regulator-boot-on;
+};
+
+&vop {
+	rockchip,vp-priority = <1 0>;
+};
+
+&i2c1 {
+	status = "okay";
+
+	panel@45 {
+		compatible = "raspberrypi,7inch-touchscreen-panel";
+		reg = <0x45>;
+
+		port {
+			panel_in_dsi1: endpoint {
+				remote-endpoint = <&dsi1_out_panel>;
+			};
+		};
+	};
+};
+
+&dsi1 {
+	status = "okay";
+};
+
+&dsi1_in {
+	dsi1_in_vp1: endpoint {
+		remote-endpoint = <&vp1_out_dsi1>;
+	};
+};
+
+&dsi1_out {
+	dsi1_out_panel: endpoint {
+		remote-endpoint = <&panel_in_dsi1>;
+	};
+};
+
+&dsi_dphy1 {
+	status = "okay";
+};
+
+&vp1 {
+	vp1_out_dsi1: endpoint@ROCKCHIP_VOP2_EP_MIPI1 {
+		reg = <ROCKCHIP_VOP2_EP_MIPI1>;
+		remote-endpoint = <&dsi1_in_vp1>;
+	};
+};

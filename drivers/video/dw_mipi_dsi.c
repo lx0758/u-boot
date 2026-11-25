@@ -81,6 +81,7 @@
 #define DSI_VID_MODE_CFG		0x38
 #define ENABLE_LOW_POWER		(0x3f << 8)
 #define ENABLE_LOW_POWER_MASK		(0x3f << 8)
+#define ENABLE_LOW_POWER_CMD		BIT(15)
 #define VID_MODE_TYPE_NON_BURST_SYNC_PULSES	0x0
 #define VID_MODE_TYPE_NON_BURST_SYNC_EVENTS	0x1
 #define VID_MODE_TYPE_BURST			0x2
@@ -212,6 +213,8 @@
 #define MAX_RD_TIME_V131(lbcc)		((lbcc) & 0x7fff)
 
 #define PHY_STATUS_TIMEOUT_US		10000
+/* A cold PLL/LDO needs >10ms to lock; keep a generous window */
+#define PHY_LOCK_TIMEOUT_US		200000
 #define CMD_PKT_STATUS_TIMEOUT_US	20000
 
 struct dw_mipi_dsi {
@@ -298,8 +301,16 @@ static void dw_mipi_message_config(struct dw_mipi_dsi *dsi,
 	if (lpm)
 		val |= CMD_MODE_ALL_LP;
 
-	dsi_write(dsi, DSI_LPCLK_CTRL, lpm ? 0 : PHY_TXREQUESTCLKHS);
+	/* Clock-lane state is set once per mode in dw_mipi_dsi_set_mode() */
 	dsi_write(dsi, DSI_CMD_MODE_CFG, val);
+
+	/* Linux tracks the LP command mode in the video mode config as well */
+	val = dsi_read(dsi, DSI_VID_MODE_CFG);
+	if (lpm)
+		val |= ENABLE_LOW_POWER_CMD;
+	else
+		val &= ~ENABLE_LOW_POWER_CMD;
+	dsi_write(dsi, DSI_VID_MODE_CFG, val);
 }
 
 static int dw_mipi_dsi_gen_pkt_hdr_write(struct dw_mipi_dsi *dsi, u32 hdr_val)
@@ -469,9 +480,12 @@ static void dw_mipi_dsi_set_mode(struct dw_mipi_dsi *dsi,
 	if (mode_flags & MIPI_DSI_MODE_VIDEO) {
 		dsi_write(dsi, DSI_MODE_CFG, ENABLE_VIDEO_MODE);
 		dw_mipi_dsi_video_mode_config(dsi);
+		/* Video mode: keep the HS clock lane running continuously */
 		dsi_write(dsi, DSI_LPCLK_CTRL, PHY_TXREQUESTCLKHS);
 	} else {
 		dsi_write(dsi, DSI_MODE_CFG, ENABLE_CMD_MODE);
+		/* Command mode: clock lane in LP, as Linux does for LP bring-up */
+		dsi_write(dsi, DSI_LPCLK_CTRL, 0);
 	}
 
 	if (phy_ops->post_set_mode)
@@ -716,10 +730,12 @@ static void dw_mipi_dsi_dphy_enable(struct dw_mipi_dsi *dsi)
 		  PHY_UNRSTZ | PHY_UNSHUTDOWNZ);
 
 	ret = readl_poll_timeout(dsi->base + DSI_PHY_STATUS, val,
-				 val & PHY_LOCK, PHY_STATUS_TIMEOUT_US);
+				 val & PHY_LOCK, PHY_LOCK_TIMEOUT_US);
 	if (ret)
-		dev_dbg(dsi->dsi_host.dev,
-			"failed to wait phy lock state\n");
+		dev_err(dsi->dsi_host.dev,
+			"phy failed to lock after %dus (status=0x%08x)\n",
+			PHY_LOCK_TIMEOUT_US,
+			readl(dsi->base + DSI_PHY_STATUS));
 
 	ret = readl_poll_timeout(dsi->base + DSI_PHY_STATUS,
 				 val, val & PHY_STOP_STATE_CLK_LANE,

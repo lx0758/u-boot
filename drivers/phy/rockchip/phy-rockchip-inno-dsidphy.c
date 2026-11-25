@@ -411,6 +411,7 @@ static void inno_dsidphy_mipi_mode_enable(struct inno_dsidphy *inno)
 	phy_update_bits(inno, REGISTER_PART_ANALOG, 0x01,
 			REG_LDOPD_MASK | REG_PLLPD_MASK,
 			REG_LDOPD_POWER_ON | REG_PLLPD_POWER_ON);
+
 	/* Reset analog */
 	phy_update_bits(inno, REGISTER_PART_ANALOG, 0x01,
 			REG_SYNCRST_MASK, REG_SYNCRST_RESET);

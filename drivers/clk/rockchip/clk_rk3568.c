@@ -377,6 +377,10 @@ static ulong rk3568_pmuclk_get_rate(struct clk *clk)
 	case PCLK_PMU:
 		rate = rk3568_pmu_get_pmuclk(priv);
 		break;
+	case CLK_HDMI_REF:
+		rate = rockchip_pll_get_rate(&rk3568_pll_clks[HPLL],
+					     priv->pmucru, HPLL);
+		break;
 	default:
 		return -ENOENT;
 	}
@@ -407,6 +411,14 @@ static ulong rk3568_pmuclk_set_rate(struct clk *clk, ulong rate)
 					    priv->pmucru, HPLL, rate);
 		priv->hpll_hz = rockchip_pll_get_rate(&rk3568_pll_clks[HPLL],
 						      priv->pmucru, HPLL);
+		break;
+	case CLK_HDMI_REF:
+		/* clk_hdmi_ref is HPLL via PMU_CLKSEL_CON8 bit7 (0 = hpll) */
+		ret = rockchip_pll_set_rate(&rk3568_pll_clks[HPLL],
+					    priv->pmucru, HPLL, rate);
+		priv->hpll_hz = rockchip_pll_get_rate(&rk3568_pll_clks[HPLL],
+						      priv->pmucru, HPLL);
+		rk_clrsetreg(&priv->pmucru->pmu_clksel_con[8], BIT(7), 0);
 		break;
 	case CLK_RTC_32K:
 	case CLK_RTC32K_FRAC:
@@ -1825,7 +1837,11 @@ static ulong rk3568_dclk_vop_set_clk(struct rk3568_clk_priv *priv,
 			     ((div - 1) << DCLK0_VOP_DIV_SHIFT));
 		rk3568_pmu_pll_set_rate(priv, HPLL, div * rate);
 	} else if (sel == DCLK_VOP_SEL_VPLL) {
-		div = DIV_ROUND_UP(RK3568_VOP_PLL_LIMIT_FREQ, rate);
+		if (priv->vpll_hz)
+			div = DIV_ROUND_UP(priv->vpll_hz, rate);
+		else
+			div = DIV_ROUND_UP(RK3568_VOP_PLL_LIMIT_FREQ, rate);
+
 		rk_clrsetreg(&cru->clksel_con[conid],
 			     DCLK0_VOP_DIV_MASK | DCLK0_VOP_SEL_MASK,
 			     (DCLK_VOP_SEL_VPLL << DCLK0_VOP_SEL_SHIFT) |

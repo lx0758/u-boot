@@ -6,6 +6,19 @@
 	bootph-pre-ram;
 };
 
+/* VOP2 + HDMI：U-Boot proper 阶段点亮屏幕（v1.1/v2.1 共用） */
+&vop {
+	bootph-pre-ram;
+};
+
+&vop_mmu {
+	bootph-pre-ram;
+};
+
+&hdmi {
+	bootph-pre-ram;
+};
+
 &sfc {
 	flash@0 {
 		bootph-pre-ram;
